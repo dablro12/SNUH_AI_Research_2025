@@ -7,9 +7,10 @@ data
 annotation
 Segment
 
-logs/*
+source/logs
 
+*.pth
+*.ckpt
 
 __pycache__
 pretrained_weight
-

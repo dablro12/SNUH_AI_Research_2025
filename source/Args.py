@@ -65,8 +65,8 @@ class Args_experiments:
     scheduler_fn = staticmethod(lambda optimizer: CosineAnnealingLR(optimizer, T_max=20))
 
     #% Loss Collection
-    # loss_fn = staticmethod(lambda: BCEWithLogitsLoss()) # DICE : 0.79
+    loss_fn = staticmethod(lambda: BCEWithLogitsLoss()) # DICE : 0.79
     # loss_fn = staticmethod(lambda: DiceCELoss(include_background=True)) # include_background=False 로 설정
     # loss_fn = staticmethod(lambda: BoundaryLoss()) # DICE : 0.7443
     # loss_fn = staticmethod(lambda: Active_BoundaryLoss()) # DICE : None 
-    loss_fn = staticmethod(lambda: MSELoss()) # DICE : 0.3058
+    # loss_fn = staticmethod(lambda: MSELoss()) # DICE : 0.3058

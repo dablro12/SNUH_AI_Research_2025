@@ -14,6 +14,13 @@ seed_everything()
 load_dotenv('.env')
 metrics = SegmentationMetrics()
 
+def get_int_seed(env_key, default=42):
+    val = os.getenv(env_key, default)
+    try:
+        return int(val)
+    except Exception:
+        return default
+
 class Trainer:
     def __init__(self):
         self.train_loader, self.valid_loader = self.data_load()
@@ -21,7 +28,8 @@ class Trainer:
 
     def data_load(self):
         tuning_df = pd.read_csv(os.getenv('TUNING_CSV'))
-        kf = KFold(n_splits=5, shuffle=True, random_state=os.getenv('SEED'))
+        # SEED를 int로 변환하여 넘김 (ValueError 방지)
+        kf = KFold(n_splits=5, shuffle=True, random_state=get_int_seed('SEED', 42))
         train_idx, val_idx = next(kf.split(tuning_df))
         train_df = tuning_df.iloc[train_idx].reset_index(drop=True)
         valid_df = tuning_df.iloc[val_idx].reset_index(drop=True)
@@ -177,5 +185,5 @@ if __name__ == "__main__":
     trainer = Trainer()
     num_epochs = Args_experiments.epoch
     patience = Args_experiments.patience
-    exp_name = "seg_experiment"
+    exp_name = "DeepSA-ft-BCE"
     trainer.run_training(num_epochs, patience, exp_name)
