@@ -1,0 +1,2 @@
+pixel_accuracy,mean_pixel_accuracy,iou,precision,recall,f1_score,dice_coef
+0.979,0.895,0.657,0.795,0.800,0.790,0.790

@@ -1,0 +1,15 @@
+# Git LFS를 사용할 대용량 파일
+# 설정 파일만 포함
+!settings/
+!README.md 
+
+data
+annotation
+Segment
+
+logs/*
+
+
+__pycache__
+pretrained_weight
+
