@@ -1,7 +1,7 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import torch
-print(torch.cuda.device_count()) 
+print(torch.cuda.device_count())
 
 from dotenv import load_dotenv
 import os, sys
@@ -12,7 +12,6 @@ from utilities.seed import seed_everything
 from utilities.datasets import CAG_Dataset
 from utilities.metrics import SegmentationMetrics
 from Args import Args_Train_Loader, Args_Valid_Loader, Args_experiments
-import torch
 from tqdm import tqdm
 
 seed_everything()
@@ -29,11 +28,10 @@ def get_int_seed(env_key, default=42):
 class Trainer:
     def __init__(self):
         self.train_loader, self.valid_loader = self.data_load()
-        self.model, self.optimizer, self.scheduler, self.loss_fn = self.model_load()
+        self.model = self.model_load()
 
     def data_load(self):
         tuning_df = pd.read_csv(os.getenv('TUNING_CSV'))
-        # SEED를 int로 변환하여 넘김 (ValueError 방지)
         kf = KFold(n_splits=5, shuffle=True, random_state=get_int_seed('SEED', 42))
         train_idx, val_idx = next(kf.split(tuning_df))
         train_df = tuning_df.iloc[train_idx].reset_index(drop=True)
@@ -75,20 +73,10 @@ class Trainer:
         return train_loader, valid_loader
 
     def model_load(self):
-        from models.deepsa import build_model
-        model = build_model(
-            ckpt_path=os.getenv('deepsa_ckpt_path'),
-            device=Args_experiments.device
-        ).to(Args_experiments.device)
-        
-        # 병렬처리시 사용
-        import torch.nn as nn
-        model = nn.DataParallel(model, device_ids=Args_experiments.device_ids)
-        
-        optimizer = Args_experiments.optimizer_fn(model.parameters())
-        scheduler = Args_experiments.scheduler_fn(optimizer)
-        loss_fn = Args_experiments.loss_fn()
-        return model, optimizer, scheduler, loss_fn
+        sys.path.append('./source')
+        from models.med_seg_diff import build_model as build_model_med_seg_diff
+        model = build_model_med_seg_diff(device=Args_experiments.device)
+        return model
 
     @staticmethod
     def set_lr(optimizer, lr):
@@ -99,19 +87,20 @@ class Trainer:
     def get_lr(optimizer):
         return optimizer.param_groups[0]['lr']
 
-    def train_one_epoch(self, model, loader, optimizer, loss_fn, device):
+    def train_one_epoch(self, model, loader, optimizer, device):
         model.train()
         epoch_loss, metric_sum = 0, None
         for imgs, masks in tqdm(loader, desc="Train", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
             optimizer.zero_grad()
-            outputs = model(imgs)
-            loss = loss_fn(outputs, masks)
+            loss = model(masks, imgs)  # seg_model의 입력: (segmented_imgs, input_imgs)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             epoch_loss += loss.item() * imgs.size(0)
-            batch_metrics = metrics.evaluate(torch.sigmoid(outputs), masks)
+            # 예측값은 필요시 model.sample로 추론
+            pred = model.sample(imgs)
+            batch_metrics = metrics.evaluate(torch.sigmoid(pred), masks)
             if metric_sum is None:
                 metric_sum = {k: v * imgs.size(0) for k, v in batch_metrics.items()}
             else:
@@ -122,15 +111,15 @@ class Trainer:
         return epoch_loss / n, avg_metrics
 
     @torch.no_grad()
-    def valid_one_epoch(self, model, loader, loss_fn, device):
+    def valid_one_epoch(self, model, loader, device):
         model.eval()
         epoch_loss, metric_sum = 0, None
         for imgs, masks in tqdm(loader, desc="Valid", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
-            outputs = model(imgs)
-            loss = loss_fn(outputs, masks)
+            loss = model(masks, imgs)
             epoch_loss += loss.item() * imgs.size(0)
-            batch_metrics = metrics.evaluate(torch.sigmoid(outputs), masks)
+            pred = model.sample(imgs)
+            batch_metrics = metrics.evaluate(torch.sigmoid(pred), masks)
             if metric_sum is None:
                 metric_sum = {k: v * imgs.size(0) for k, v in batch_metrics.items()}
             else:
@@ -146,31 +135,33 @@ class Trainer:
         patience_counter = 0
         save_dir = os.path.join(os.getenv("EXPERIMENT_DIR", "./EXPERIMENT_DIR"), exp_name)
         os.makedirs(save_dir, exist_ok=True)
-        
+
         best_weight_path = os.path.join(save_dir, "best_weight_dice.pth")
         best_weight_loss_path = os.path.join(save_dir, "best_weight_loss.pth")
         warmup_epoch = getattr(Args_experiments, "warmup_epoch", 0)
         base_lr = Args_experiments.lr
 
+        optimizer = Args_experiments.optimizer_fn(self.model.parameters())
+        scheduler = Args_experiments.scheduler_fn(optimizer)
+
         for epoch in range(1, num_epochs + 1):
             print(f"Epoch {epoch}/{num_epochs}")
             if warmup_epoch > 0 and epoch <= warmup_epoch:
                 warmup_lr = base_lr * epoch / warmup_epoch
-                self.set_lr(self.optimizer, warmup_lr)
-                print(f"Warmup lr: {self.get_lr(self.optimizer):.6f}")
+                self.set_lr(optimizer, warmup_lr)
+                print(f"Warmup lr: {self.get_lr(optimizer):.6f}")
             elif warmup_epoch > 0 and epoch == warmup_epoch + 1:
-                self.set_lr(self.optimizer, base_lr)
-                print(f"Set lr to base: {self.get_lr(self.optimizer):.6f}")
+                self.set_lr(optimizer, base_lr)
+                print(f"Set lr to base: {self.get_lr(optimizer):.6f}")
 
             train_loss, train_metrics = self.train_one_epoch(
-                self.model, self.train_loader, self.optimizer, self.loss_fn, Args_experiments.device
+                self.model, self.train_loader, optimizer, Args_experiments.device
             )
             valid_loss, valid_metrics = self.valid_one_epoch(
-                self.model, self.valid_loader, self.loss_fn, Args_experiments.device
+                self.model, self.valid_loader, Args_experiments.device
             )
-            self.scheduler.step()
+            scheduler.step()
 
-            # dice 기준 best
             if valid_metrics["dice_coef"] > best_dice:
                 best_dice = valid_metrics["dice_coef"]
                 patience_counter = 0
@@ -185,7 +176,6 @@ class Trainer:
                     print("Early stopping triggered.")
                     break
 
-            # loss 기준 best
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
                 torch.save(self.model.state_dict(), best_weight_loss_path)
@@ -195,5 +185,5 @@ if __name__ == "__main__":
     trainer = Trainer()
     num_epochs = Args_experiments.epoch
     patience = Args_experiments.patience
-    exp_name = "DeepSA-ft-BCE"
+    exp_name = "MedSegDiff-ft"
     trainer.run_training(num_epochs, patience, exp_name)

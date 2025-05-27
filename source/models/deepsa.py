@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from models import remove_module_prefix
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_features):
@@ -328,6 +328,9 @@ def build_model(ckpt_path:str = None, device:str='cpu'):
     if ckpt_path is not None:
         checkpoint = torch.load(ckpt_path, map_location = 'cuda')
         new_state_dict = {k.replace('module.', ''): v for k, v in checkpoint['netE'].items()}
-        netE.load_state_dict(new_state_dict)
+        try:
+            netE.load_state_dict(checkpoint)
+        except:
+            netE.load_state_dict(remove_module_prefix(checkpoint))
     
     return netE
