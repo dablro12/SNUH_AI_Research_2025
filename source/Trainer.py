@@ -13,11 +13,19 @@ from utilities.datasets import CAG_Dataset
 from utilities.metrics import SegmentationMetrics
 from Args import Args_Train_Loader, Args_Valid_Loader, Args_experiments
 import torch
+torch.set_num_threads(20)
 from tqdm import tqdm
 
 seed_everything()
 load_dotenv('.env')
 metrics = SegmentationMetrics()
+
+@property
+def device(self):
+    params = list(self.parameters())
+    if len(params) == 0:
+        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return params[0].device
 
 def get_int_seed(env_key, default=42):
     val = os.getenv(env_key, default)
@@ -105,7 +113,9 @@ class Trainer:
         for imgs, masks in tqdm(loader, desc="Train", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
             optimizer.zero_grad()
-            outputs = model(imgs)
+            # outputs = model(imgs) # Single GPU
+            outputs = model.module(imgs) # Multi GPU
+            
             loss = loss_fn(outputs, masks)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -127,7 +137,8 @@ class Trainer:
         epoch_loss, metric_sum = 0, None
         for imgs, masks in tqdm(loader, desc="Valid", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
-            outputs = model(imgs)
+            # outputs = model(imgs) # Single GPU
+            outputs = model.module(imgs) # Multi GPU
             loss = loss_fn(outputs, masks)
             epoch_loss += loss.item() * imgs.size(0)
             batch_metrics = metrics.evaluate(torch.sigmoid(outputs), masks)

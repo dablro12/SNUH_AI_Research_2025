@@ -668,7 +668,10 @@ class MedSegDiff(Module):
 
     @property
     def device(self):
-        return next(self.parameters()).device
+        params = list(self.parameters())
+        if len(params) == 0:
+            return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        return params[0].device
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -887,8 +890,9 @@ def build_model(ckpt_path: str = None, device: str = 'cpu'):
             model.load_state_dict(remove_module_prefix(checkpoint))
 
     diffusion = MedSegDiff(
-        nn.DataParallel(model, device_ids = [0, 1]),
+        model,
         timesteps=1000
     )
 
     return diffusion.to(device)
+

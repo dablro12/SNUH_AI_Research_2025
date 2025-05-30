@@ -11,7 +11,7 @@ import torch
 import os
 
 class Args_Train_Loader:
-    train_bs = 4
+    train_bs = 16
     num_workers = 20
     pin_memory = True
     shuffle = True
@@ -20,14 +20,15 @@ class Args_Train_Loader:
     @staticmethod
     def _get_default_transform():
         return A.Compose([
-            A.Resize(224, 224),
+            A.Resize(512, 512),
             A.ToFloat(max_value=255.0),
             ToTensorV2(),
         ])
     @staticmethod
     def _get_aug_transform():
         return A.Compose([
-            A.RandomResizedCrop(size=(256, 256), scale=(0.8, 1.0), ratio=(0.75, 1.33), p=1.0),
+            # A.RandomResizedCrop(size=(256, 256), scale=(0.8, 1.0), ratio=(0.75, 1.33), p=1.0),
+            A.RandomResizedCrop(size=(470, 470), scale=(0.8, 1.0), ratio=(0.75, 1.33), p=1.0),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.Rotate(limit=15, p=0.5),
@@ -52,7 +53,7 @@ class Args_Valid_Loader:
     @staticmethod
     def _get_default_transform():
         return A.Compose([
-            A.Resize(224, 224),
+            A.Resize(512, 512),
             A.ToFloat(max_value=255.0),
             ToTensorV2(),
         ])

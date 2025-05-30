@@ -327,7 +327,7 @@ def build_model(ckpt_path:str = None, device:str='cpu'):
     #%% Pretrained Model Load
     if ckpt_path is not None:
         checkpoint = torch.load(ckpt_path, map_location = 'cuda')
-        new_state_dict = {k.replace('module.', ''): v for k, v in checkpoint['netE'].items()}
+        # new_state_dict = {k.replace('module.', ''): v for k, v in checkpoint['netE'].items()}
         try:
             netE.load_state_dict(checkpoint)
         except:

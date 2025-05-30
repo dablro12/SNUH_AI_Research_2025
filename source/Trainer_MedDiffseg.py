@@ -2,6 +2,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import torch
 print(torch.cuda.device_count())
+torch.set_num_threads(20)
 
 from dotenv import load_dotenv
 import os, sys
@@ -17,6 +18,13 @@ from tqdm import tqdm
 seed_everything()
 load_dotenv('.env')
 metrics = SegmentationMetrics()
+
+@property
+def device(self):
+    params = list(self.parameters())
+    if len(params) == 0:
+        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return params[0].device
 
 def get_int_seed(env_key, default=42):
     val = os.getenv(env_key, default)
@@ -76,6 +84,8 @@ class Trainer:
         sys.path.append('./source')
         from models.med_seg_diff import build_model as build_model_med_seg_diff
         model = build_model_med_seg_diff(device=Args_experiments.device)
+        # DataParallel 적용
+        model = torch.nn.DataParallel(model, device_ids=[0, 1])
         return model
 
     @staticmethod
@@ -93,13 +103,16 @@ class Trainer:
         for imgs, masks in tqdm(loader, desc="Train", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
             optimizer.zero_grad()
-            loss = model(masks, imgs)  # seg_model의 입력: (segmented_imgs, input_imgs)
+            loss = model(masks, imgs)
+            if loss.dim() > 0:
+                loss = loss.mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             epoch_loss += loss.item() * imgs.size(0)
             # 예측값은 필요시 model.sample로 추론
-            pred = model.sample(imgs)
+            # pred = model.sample(imgs)
+            pred = model.module.sample(imgs)
             batch_metrics = metrics.evaluate(torch.sigmoid(pred), masks)
             if metric_sum is None:
                 metric_sum = {k: v * imgs.size(0) for k, v in batch_metrics.items()}
@@ -117,8 +130,10 @@ class Trainer:
         for imgs, masks in tqdm(loader, desc="Valid", leave=False):
             imgs, masks = imgs.to(device), masks.to(device)
             loss = model(masks, imgs)
+            if loss.dim() > 0:
+                loss = loss.mean()
             epoch_loss += loss.item() * imgs.size(0)
-            pred = model.sample(imgs)
+            pred = model.module.sample(imgs)
             batch_metrics = metrics.evaluate(torch.sigmoid(pred), masks)
             if metric_sum is None:
                 metric_sum = {k: v * imgs.size(0) for k, v in batch_metrics.items()}
@@ -128,6 +143,7 @@ class Trainer:
         n = len(loader.dataset)
         avg_metrics = {k: v / n for k, v in metric_sum.items()}
         return epoch_loss / n, avg_metrics
+
 
     def run_training(self, num_epochs, patience, exp_name):
         best_dice = 0
